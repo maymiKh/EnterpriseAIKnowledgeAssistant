@@ -3,6 +3,7 @@ using EnterpriseAI.Api.Contracts;
 using EnterpriseAI.Api.Services;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
+using System.ComponentModel.DataAnnotations;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,9 +39,11 @@ builder.Services.AddScoped<IChatService, ChatService>();
 // ==========================================
 
 builder.Services.AddOpenApi();
+builder.Services.AddProblemDetails();
 
 var app = builder.Build();
 
+app.UseExceptionHandler();
 // ==========================================
 // 5. HTTP Request Pipeline
 // ==========================================
@@ -49,7 +52,6 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-
 app.UseHttpsRedirection();
 
 // ==========================================
@@ -61,18 +63,32 @@ app.MapPost("/api/chat", async (
     IChatService chatService,
     CancellationToken cancellationToken) =>
 {
-    if (string.IsNullOrWhiteSpace(request.Message))
+    var validationResults = new List<ValidationResult>();
+
+    var validationContext = new ValidationContext(request);
+
+    bool isValid = Validator.TryValidateObject(
+        request,
+        validationContext,
+        validationResults,
+        validateAllProperties: true);
+
+    if (!isValid)
     {
-        return Results.BadRequest(new
-        {
-            Error = "Message cannot be empty."
-        });
+        var errors = validationResults
+            .Select(error => error.ErrorMessage)
+            .ToArray();
+
+        return Results.ValidationProblem(
+            new Dictionary<string, string[]>
+            {
+                ["message"] = errors!
+            });
     }
 
     var answer = await chatService.GetResponse(
         request.Message,
-        cancellationToken
-    );
+        cancellationToken);
 
     return Results.Ok(new EnterpriseAI.Api.Contracts.ChatResponse(answer));
 })
