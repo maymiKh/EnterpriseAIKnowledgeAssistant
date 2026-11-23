@@ -2,6 +2,7 @@
 using EnterpriseAI.Api.Configuration;
 using EnterpriseAI.Api.Contracts;
 using EnterpriseAI.Api.Exercises;
+using EnterpriseAI.Api.Infrastructure;
 using EnterpriseAI.Api.Services;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
@@ -37,6 +38,7 @@ builder.Services.AddChatClient(chatClient);
 builder.Services.AddScoped<IChatService, ChatService>();
 builder.Services.AddTransient<AsyncExercises>();
 builder.Services.AddTransient<ConcurrentExercises>();
+builder.Services.AddSingleton<AiConcurrencyLimiter>();
 
 // ==========================================
 // 4. OpenAPI Configuration
@@ -114,6 +116,30 @@ app.MapGet("/api/test/sequential", async (
         DurationMilliseconds = stopwatch.ElapsedMilliseconds
     });
 });
+
+
+app.MapGet("/api/test/concurrency", async (
+    AiConcurrencyLimiter limiter,
+    AsyncExercises exercises,
+    CancellationToken cancellationToken) =>
+{
+    await limiter.WaitAsync(cancellationToken);
+
+    try
+    {
+        var requestId = Random.Shared.Next(1000, 9999);
+
+        return Results.Ok(
+            await exercises.SimulateAiRequestAsync(
+                requestId,
+                cancellationToken));
+    }
+    finally
+    {
+        limiter.Release();
+    }
+});
+
 
 app.MapGet("/api/test/concurrent", async (
     ConcurrentExercises exercises) =>
