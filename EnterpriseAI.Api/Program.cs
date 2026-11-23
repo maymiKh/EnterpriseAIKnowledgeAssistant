@@ -1,5 +1,7 @@
 
+using EnterpriseAI.Api.Configuration;
 using EnterpriseAI.Api.Contracts;
+using EnterpriseAI.Api.Exercises;
 using EnterpriseAI.Api.Services;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
@@ -33,6 +35,8 @@ builder.Services.AddChatClient(chatClient);
 // ==========================================
 
 builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddTransient<AsyncExercises>();
+builder.Services.AddTransient<ConcurrentExercises>();
 
 // ==========================================
 // 4. OpenAPI Configuration
@@ -40,10 +44,47 @@ builder.Services.AddScoped<IChatService, ChatService>();
 
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
+builder.Services
+    .AddOptions<AiOptions>()
+    .Bind(builder.Configuration.GetSection(AiOptions.SectionName))
+    .Validate(
+        options => options.RequestTimeoutSeconds > 0,
+        "AI request timeout must be greater than zero.")
+    .ValidateOnStart();
 
 var app = builder.Build();
 
-app.UseExceptionHandler();
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var exception = context.Features
+            .Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()
+            ?.Error;
+
+        if (exception is TimeoutException)
+        {
+            context.Response.StatusCode =
+                StatusCodes.Status504GatewayTimeout;
+
+            await Results.Problem(
+                statusCode: StatusCodes.Status504GatewayTimeout,
+                title: "AI request timed out.",
+                detail: "The AI model did not respond within the configured time.")
+                .ExecuteAsync(context);
+
+            return;
+        }
+
+        context.Response.StatusCode =
+            StatusCodes.Status500InternalServerError;
+
+        await Results.Problem(
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "An unexpected error occurred.")
+            .ExecuteAsync(context);
+    });
+});
 // ==========================================
 // 5. HTTP Request Pipeline
 // ==========================================
@@ -57,6 +98,70 @@ app.UseHttpsRedirection();
 // ==========================================
 // 6. AI Chat Endpoint
 // ==========================================
+
+app.MapGet("/api/test/sequential", async (
+    ConcurrentExercises exercises) =>
+{
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+    var results = await exercises.GetDataSequentiallyAsync();
+
+    stopwatch.Stop();
+
+    return Results.Ok(new
+    {
+        Results = results,
+        DurationMilliseconds = stopwatch.ElapsedMilliseconds
+    });
+});
+
+app.MapGet("/api/test/concurrent", async (
+    ConcurrentExercises exercises) =>
+{
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+    var results = await exercises.GetDataConcurrentlyAsync();
+
+    stopwatch.Stop();
+
+    return Results.Ok(new
+    {
+        Results = results,
+        DurationMilliseconds = stopwatch.ElapsedMilliseconds
+    });
+});
+
+app.MapGet("/api/test/concurrentany", async (
+    ConcurrentExercises exercises) =>
+{
+    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+    var results = await exercises.GetDataConcurrentlyAnyAsync();
+
+    stopwatch.Stop();
+
+    return Results.Ok(new
+    {
+        Results = results,
+        DurationMilliseconds = stopwatch.ElapsedMilliseconds
+    });
+});
+
+app.MapGet("/api/test/async", async (
+    AsyncExercises exercises) =>
+{
+    var result = await exercises.GetDataAsync();
+
+    return Results.Ok(result);
+});
+
+app.MapGet("/api/test/processasync", async (
+    ConcurrentExercises exercises, CancellationToken cancellationToken) =>
+{
+    var result = await exercises.ProcessAsync(cancellationToken);
+
+    return Results.Ok(result);
+});
 
 app.MapPost("/api/chat", async (
     ChatRequest request,

@@ -2,6 +2,6 @@
 {
     public interface IChatService
     {
-        Task<string> GetResponse(string message, CancellationToken cancellationToken = default);
+        Task<string> GetResponse(string message, CancellationToken cancellationToken);
     }
 }
