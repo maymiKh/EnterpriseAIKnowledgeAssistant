@@ -36,9 +36,10 @@ builder.Services.AddChatClient(chatClient);
 // ==========================================
 
 builder.Services.AddScoped<IChatService, ChatService>();
-builder.Services.AddTransient<AsyncExercises>();
+builder.Services.AddSingleton<AsyncExercises>();
 builder.Services.AddTransient<ConcurrentExercises>();
 builder.Services.AddSingleton<AiConcurrencyLimiter>();
+builder.Services.AddSingleton<RequestCounter>();
 
 // ==========================================
 // 4. OpenAPI Configuration
@@ -117,22 +118,44 @@ app.MapGet("/api/test/sequential", async (
     });
 });
 
+app.MapPost("/api/test/counter", (RequestCounter counter) =>
+{
+    return Results.Ok(new
+    {
+        Count = counter.Increment()
+    });
+});
+
+app.MapGet("/api/test/concurrency/maximum", (
+    AsyncExercises exercises) =>
+{
+    return Results.Ok(new
+    {
+        MaximumActiveRequests =
+            exercises.GetMaximumActiveRequests()
+    });
+});
 
 app.MapGet("/api/test/concurrency", async (
     AiConcurrencyLimiter limiter,
     AsyncExercises exercises,
     CancellationToken cancellationToken) =>
 {
+    var requestId = Random.Shared.Next(1000, 9999);
+
     await limiter.WaitAsync(cancellationToken);
 
     try
     {
-        var requestId = Random.Shared.Next(1000, 9999);
+        var result = await exercises.SimulateAiRequestAsync(
+            requestId,
+            cancellationToken);
 
-        return Results.Ok(
-            await exercises.SimulateAiRequestAsync(
-                requestId,
-                cancellationToken));
+        return Results.Ok(new
+        {
+            RequestId = requestId,
+            Result = result
+        });
     }
     finally
     {

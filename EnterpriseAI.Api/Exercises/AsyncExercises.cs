@@ -2,6 +2,9 @@
 {
     public class AsyncExercises
     {
+        private int _activeRequests;
+        private int _maximumActiveRequests;
+
         public async Task<string> GetDataAsync()
         {
             Console.WriteLine("Starting operation...");
@@ -17,18 +20,53 @@
     int requestId,
     CancellationToken cancellationToken)
         {
-            Console.WriteLine(
-                $"Request {requestId} started at {DateTime.Now:HH:mm:ss}");
+            var active = Interlocked.Increment(ref _activeRequests);
 
-            await Task.Delay(
-                TimeSpan.FromSeconds(5),
-                cancellationToken);
+            UpdateMaximum(active);
 
             Console.WriteLine(
-                $"Request {requestId} completed at {DateTime.Now:HH:mm:ss}");
+                $"Request {requestId} STARTED. Active: {active}");
 
-            return $"Request {requestId} completed";
+            try
+            {
+                await Task.Delay(
+                    TimeSpan.FromSeconds(5),
+                    cancellationToken);
+
+                return $"Request {requestId} completed";
+            }
+            finally
+            {
+                var remaining = Interlocked.Decrement(ref _activeRequests);
+
+                Console.WriteLine(
+                    $"Request {requestId} FINISHED. Active: {remaining}");
+            }
         }
 
+        private void UpdateMaximum(int active)
+        {
+            int currentMaximum;
+
+            do
+            {
+                currentMaximum = Volatile.Read(ref _maximumActiveRequests);
+
+                if (active <= currentMaximum)
+                {
+                    return;
+                }
+            }
+            while (
+                Interlocked.CompareExchange(
+                    ref _maximumActiveRequests,
+                    active,
+                    currentMaximum) != currentMaximum);
+        }
+
+        public int GetMaximumActiveRequests()
+        {
+            return Volatile.Read(ref _maximumActiveRequests);
+        }
     }
 }
